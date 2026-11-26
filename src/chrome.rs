@@ -300,6 +300,9 @@ impl App {
                         self.screen = Screen::Overview;
                         self.ov_tab = OvTab::Settings;
                     }
+                    if theme::tool(ui, true, "💾 Backup").on_hover_text("Back up everything (all projects and products in one .zip file)").clicked() {
+                        self.backup_all();
+                    }
                     ui.menu_button(RichText::new("▥ Panels ▾").size(12.5), |ui| {
                         ui.checkbox(&mut self.ws.side_open, "Sidebar (properties, operations)");
                         ui.separator();

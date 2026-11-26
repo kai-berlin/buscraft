@@ -54,9 +54,9 @@ The code is in this repository; your projects and imported products are stored l
 | Linux   | `~/.local/share/BusCraft` |
 | macOS   | `~/Library/Application Support/BusCraft` |
 
-1. On the old computer: **Settings → Data → Back up everything…** saves one `.zip` file.
+1. On the old computer: **Back up everything…** (on the Projects page, or **💾 Backup** in the project toolbar) saves one `.zip` file.
 2. Copy that file to the new computer (USB stick, cloud drive, …).
-3. On the new computer: **Settings → Data → Restore a backup…** and choose the file.
+3. On the new computer: **Restore backup…** on the Projects page, and choose the file.
 
 Product files (`.knxprod`) and projects (`.knxproj`) only need to be imported again if you
 didn't make a backup. For the bus, the new computer must reach the KNX IP interface or router on the

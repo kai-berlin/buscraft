@@ -588,6 +588,10 @@ impl App {
                 lines.extend(crate::knx::check_report(4, 0x3F6E, &app_dev, &app_exp));
                 self.report_view = Some(("Device check 1.1.28 Example device".into(), lines.join("\n")));
             }
+            "home" => {
+                self.screen = Screen::Overview;
+                self.ov_tab = OvTab::Projects;
+            }
             "settings" => {
                 self.screen = Screen::Overview;
                 self.ov_tab = OvTab::Settings;
@@ -1051,6 +1055,13 @@ impl App {
                 if ui.add_enabled(self.ov_sel.is_some(), egui::Button::new("Delete")).clicked() {
                     self.confirm_delete = self.ov_sel;
                 }
+                ui.separator();
+                if ui.button("💾 Back up everything…").on_hover_text("All projects and imported products in one .zip file – for moving to another computer").clicked() {
+                    self.backup_all();
+                }
+                if ui.button("⟲ Restore backup…").on_hover_text("Load a backup made with \"Back up everything\"").clicked() {
+                    self.pick_restore();
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add(egui::TextEdit::singleline(&mut self.ov_filter).hint_text("🔍 Search projects").desired_width(200.0));
                 });
@@ -1436,7 +1447,7 @@ impl App {
         });
     }
 
-    fn backup_all(&mut self) {
+    pub(crate) fn backup_all(&mut self) {
         if self.shot.is_some() {
             return;
         }
@@ -1449,7 +1460,7 @@ impl App {
         }
     }
 
-    fn pick_restore(&mut self) {
+    pub(crate) fn pick_restore(&mut self) {
         let Some(path) = rfd::FileDialog::new().add_filter("BusCraft backup", &["zip"]).pick_file() else { return };
         match crate::backup::describe(&path) {
             Ok(d) => self.confirm_restore = Some((path, d)),
