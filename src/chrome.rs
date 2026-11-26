@@ -27,16 +27,9 @@ pub fn view_label(v: View) -> (&'static str, &'static str) {
 }
 
 /// The app mark: a small rounded square with a bus-line glyph.
-pub fn brand(ui: &mut Ui, bg: Color32, fg: Color32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(rect, 4.0, bg);
-    let c = rect.center();
-    let s = Stroke::new(2.0, fg);
-    p.line_segment([c + egui::vec2(-6.0, 5.0), c + egui::vec2(6.0, 5.0)], s);
-    p.line_segment([c + egui::vec2(-6.0, 5.0), c + egui::vec2(-6.0, -5.0)], s);
-    p.line_segment([c + egui::vec2(0.0, 5.0), c + egui::vec2(0.0, -2.0)], s);
-    p.line_segment([c + egui::vec2(6.0, 5.0), c + egui::vec2(6.0, -6.0)], s);
+/// The app icon in the title bar.
+pub fn brand(ui: &mut Ui) {
+    crate::icon::show(ui, 26.0);
 }
 
 fn side_header(ui: &mut Ui, icon: &str, text: &str, active: bool, badge: usize) -> egui::Response {
@@ -69,7 +62,7 @@ impl App {
                 ui.vertical(|ui| {
                     ui.add_space(1.0);
                     ui.horizontal(|ui| {
-                        brand(ui, Color32::WHITE, theme::HEADER);
+                        brand(ui);
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             ui.label(RichText::new("BusCraft").strong().size(13.5).color(theme::HEADER_TEXT));

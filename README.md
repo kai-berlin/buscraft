@@ -10,6 +10,8 @@ It runs on Windows, Linux and macOS and works on its own – no other KNX softwa
 - Programming individual addresses and downloading applications
 - Diagnostics (Monitors panel or **Diagnostics ▾** in the toolbar): device info, devices in
   programming mode (switch it on or off), individual address check and line scan
+- Built-in MCP server, so an AI assistant can read and change projects, watch the group monitor
+  and send values (see below)
 
 ## Build on Linux
 
@@ -63,6 +65,24 @@ The code is in this repository; your projects and imported products are stored l
 Product files (`.knxprod`) and projects (`.knxproj`) only need to be imported again if you
 didn't make a backup. For the bus, the new computer must reach the KNX IP interface or router on the
 network (UDP port 3671).
+
+## AI assistants (MCP server)
+
+While BusCraft runs, it offers an MCP server on this computer only: `http://127.0.0.1:47811/mcp`
+(switch it off or change the port in **Settings › AI assistants**). Assistants that connect by URL
+use that address. Assistants that start a program (such as Claude Desktop) use the bridge, which
+passes everything on to the running app:
+
+```json
+{ "mcpServers": { "buscraft": { "command": "C:/path/to/buscraft.exe", "args": ["--mcp-stdio"] } } }
+```
+
+Add `"--port", "<port>"` to the args if you changed the port. **Copy settings** in Settings fills in
+the right path. Tools: list/open projects, project overview, devices (list, details, add, change,
+delete, parameters, rooms), group addresses (list, create, change, delete, name ranges, link and
+unlink group objects), product catalog, bus status, group monitor telegrams, and writing or reading
+group values. Changes to the open project show up at once and can be undone; changed devices
+still have to be downloaded from the app.
 
 ## Other
 

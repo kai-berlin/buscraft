@@ -11,6 +11,7 @@ egui = "0.37"
 egui_extras = "0.37"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 pbkdf2 = "0.13.0"
+resvg = { version = "0.50.0", default-features = false }
 rfd = "0.18.0"
 roxmltree = "0.21.2"
 serde = { version = "1.0.229", features = ["derive"] }

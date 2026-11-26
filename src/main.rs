@@ -21,7 +21,10 @@ mod knxproj;
 mod knxtests;
 #[cfg(test)]
 mod dltests;
+mod icon;
 mod library;
+mod mcp;
+mod mcp_tools;
 mod model;
 mod panes;
 mod props;
@@ -40,12 +43,27 @@ impl eframe::App for Runner {
 
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    // MCP bridge for assistants that start servers as programs: no window, talks to the running app.
+    if args.iter().any(|a| a == "--mcp-stdio") {
+        let port = args
+            .iter()
+            .position(|a| a == "--port")
+            .and_then(|i| args.get(i + 1))
+            .and_then(|p| p.parse().ok())
+            .or_else(|| std::env::var("BUSCRAFT_MCP_PORT").ok().and_then(|p| p.parse().ok()))
+            .unwrap_or(mcp::DEFAULT_PORT);
+        mcp::stdio_bridge(port);
+        return Ok(());
+    }
     let shot = args.iter().position(|a| a == "--screenshot").and_then(|i| args.get(i + 1)).map(PathBuf::from);
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("BusCraft")
         .with_inner_size([1366.0, 840.0])
         .with_min_inner_size([960.0, 600.0]);
+    if let Some(icon) = icon::window_icon() {
+        viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
     if shot.is_some() {
         viewport = viewport.with_active(false);
         #[cfg(windows)]

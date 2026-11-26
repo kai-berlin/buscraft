@@ -365,6 +365,17 @@ pub struct Store {
     pub layouts: std::collections::HashMap<String, Vec<Ws>>,
     #[serde(default)]
     pub layout_active: std::collections::HashMap<String, usize>,
+    /// Built-in MCP server for AI assistants (this computer only).
+    #[serde(default = "yes")]
+    pub mcp_enabled: bool,
+    #[serde(default = "mcp_port")]
+    pub mcp_port: u16,
+}
+fn yes() -> bool {
+    true
+}
+fn mcp_port() -> u16 {
+    crate::mcp::DEFAULT_PORT
 }
 fn one() -> f32 {
     1.0
@@ -445,6 +456,10 @@ pub struct App {
     pub retry_download: bool,
     /// A backup file waiting for confirmation before it replaces the local data: (file, description).
     pub confirm_restore: Option<(PathBuf, String)>,
+    /// Built-in MCP server; its tool calls are carried out at the start of each frame.
+    pub mcp: crate::mcp::McpServer,
+    /// Port typed in Settings (applied with the button).
+    pub mcp_port_text: String,
 }
 
 /// The app's data folder (projects, product library, download logs).
@@ -488,8 +503,15 @@ impl App {
             office.number = "2026-014".into();
             office.modified -= 86_400 * 3;
             office.created -= 86_400 * 9;
-            Store { projects: vec![sample_project(&catalog), office], dark: false, zoom: 1.0, default_ga_style: GaStyle::ThreeLevel, saved_interfaces: vec![], product_language: default_lang(), layouts: Default::default(), layout_active: Default::default() }
+            Store { projects: vec![sample_project(&catalog), office], dark: false, zoom: 1.0, default_ga_style: GaStyle::ThreeLevel, saved_interfaces: vec![], product_language: default_lang(), layouts: Default::default(), layout_active: Default::default(), mcp_enabled: true, mcp_port: mcp_port() }
         });
+        let mut mcp = crate::mcp::McpServer::default();
+        mcp.port = store.mcp_port;
+        if store.mcp_enabled && shot.is_none() {
+            mcp.start(store.mcp_port);
+        } else if store.mcp_enabled {
+            mcp.status = "Not started while taking a screenshot".into();
+        }
         let ov_sel = store.projects.first().map(|p| p.id);
         let mut bus = Bus::new();
         for s in &store.saved_interfaces {
@@ -515,6 +537,8 @@ impl App {
             pending_download: None,
             retry_download: false,
             confirm_restore: None,
+            mcp_port_text: String::new(),
+            mcp,
             screen: Screen::Overview,
             ov_tab: OvTab::Projects,
             ov_sel,
@@ -871,6 +895,7 @@ impl App {
             ctx.global_style_mut(|s| s.interaction.selectable_labels = shift);
         }
 
+        self.mcp_poll(&ctx);
         match self.screen {
             Screen::Overview => {
                 self.bus.tick(dt, None);
@@ -1024,7 +1049,7 @@ impl App {
             .frame(egui::Frame::new().fill(theme::HEADER).inner_margin(Margin { left: 10, right: 14, top: 6, bottom: 0 }))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    crate::chrome::brand(ui, Color32::WHITE, theme::HEADER);
+                    crate::chrome::brand(ui);
                     ui.label(RichText::new("BusCraft").size(16.0).strong().color(theme::HEADER_TEXT));
                     ui.add_space(28.0);
                     for (t, label) in [(OvTab::Projects, "Overview"), (OvTab::Bus, "Bus"), (OvTab::Catalogs, "Catalogs"), (OvTab::Settings, "Settings")] {
@@ -1478,6 +1503,8 @@ impl App {
             });
             ui.label(RichText::new(format!("{} imported product(s) in the library. The language applies to future imports.", self.library.products.len())).small().color(theme::MUTED));
             ui.add_space(8.0);
+            self.mcp_settings(ui);
+            ui.add_space(8.0);
             theme::section(ui, "Data");
             ui.label(RichText::new(format!("Projects and imported products are saved automatically in {}", data_dir().display())).color(theme::MUTED).small());
             ui.add_space(4.0);
@@ -1504,6 +1531,70 @@ impl App {
                 self.say("Sample project added");
             }
         });
+    }
+
+    /// Settings for the built-in MCP server (AI assistants).
+    fn mcp_settings(&mut self, ui: &mut egui::Ui) {
+        theme::section(ui, "AI assistants (MCP server)");
+        ui.label("Lets an AI assistant read and change your projects, watch the group monitor and send values. Only programs on this computer can connect. Changes to the open project can be undone.");
+        ui.horizontal(|ui| {
+            let mut on = self.store.mcp_enabled;
+            if ui.checkbox(&mut on, "MCP server on").changed() {
+                self.store.mcp_enabled = on;
+                self.dirty = true;
+                if on {
+                    self.mcp.start(self.store.mcp_port);
+                } else {
+                    self.mcp.stop();
+                }
+            }
+            ui.label("Port");
+            if self.mcp_port_text.is_empty() {
+                self.mcp_port_text = self.store.mcp_port.to_string();
+            }
+            ui.add(egui::TextEdit::singleline(&mut self.mcp_port_text).desired_width(60.0));
+            let port = self.mcp_port_text.trim().parse::<u16>().ok().filter(|p| *p >= 1024);
+            if ui.add_enabled(port.is_some() && port != Some(self.store.mcp_port), egui::Button::new("Apply")).clicked() {
+                self.store.mcp_port = port.unwrap();
+                self.dirty = true;
+                if self.store.mcp_enabled {
+                    self.mcp.start(self.store.mcp_port);
+                } else {
+                    self.mcp.port = self.store.mcp_port;
+                }
+            }
+        });
+        let (dot, col) = if self.mcp.running { ("●", theme::OK) } else { ("○", theme::MUTED) };
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(dot).color(col));
+            ui.label(&self.mcp.status);
+            if self.mcp.calls > 0 {
+                ui.label(RichText::new(format!("· {} call(s), last: {}", self.mcp.calls, self.mcp.last_call)).color(theme::MUTED));
+            }
+        });
+        let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "buscraft".into());
+        let url = format!("http://127.0.0.1:{}/mcp", self.store.mcp_port);
+        let mut args = vec!["--mcp-stdio".to_string()];
+        if self.store.mcp_port != crate::mcp::DEFAULT_PORT {
+            args.extend(["--port".to_string(), self.store.mcp_port.to_string()]);
+        }
+        let desktop = serde_json::to_string_pretty(&serde_json::json!({"mcpServers": {"buscraft": {"command": exe, "args": args}}})).unwrap_or_default();
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Address for assistants that connect by URL:");
+            ui.label(RichText::new(&url).monospace());
+            if ui.small_button("Copy").clicked() {
+                ui.ctx().copy_text(url.clone());
+                self.say("MCP address copied");
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("For assistants that start a program (e.g. Claude Desktop), add this to their MCP settings; BusCraft must be running:");
+            if ui.small_button("Copy settings").clicked() {
+                ui.ctx().copy_text(desktop.clone());
+                self.say("MCP settings copied");
+            }
+        });
+        ui.add(egui::Label::new(RichText::new(&desktop).monospace().small().color(theme::MUTED)).wrap());
     }
 
     pub(crate) fn backup_all(&mut self) {
@@ -1861,19 +1952,6 @@ impl App {
             self.about = open;
         }
     }
-}
-
-#[allow(dead_code)]
-pub fn logo(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(rect, 4.0, theme::ACCENT);
-    let c = rect.center();
-    let s = egui::Stroke::new(2.0, Color32::WHITE);
-    p.line_segment([c + egui::vec2(-6.0, 5.0), c + egui::vec2(6.0, 5.0)], s);
-    p.line_segment([c + egui::vec2(-6.0, 5.0), c + egui::vec2(-6.0, -5.0)], s);
-    p.line_segment([c + egui::vec2(0.0, 5.0), c + egui::vec2(0.0, -2.0)], s);
-    p.line_segment([c + egui::vec2(6.0, 5.0), c + egui::vec2(6.0, -6.0)], s);
 }
 
 /// Show a folder in the system's file manager.

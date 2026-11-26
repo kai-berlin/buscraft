@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="title desc">
+  <title id="title">BusCraft</title>
+  <desc id="desc">A house and modern building with lighting, blinds, temperature and ventilation controls linked by a turquoise automation bus.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="1" x2="0.86" y2="0">
+      <stop offset="0" stop-color="#04123e"/>
+      <stop offset=".53" stop-color="#052357"/>
+      <stop offset="1" stop-color="#087c9c"/>
+    </linearGradient>
+    <radialGradient id="blueShade" cx=".23" cy=".53" r=".85" gradientTransform="matrix(1 0 0 1 0 0)">
+      <stop offset="0" stop-color="#020d37" stop-opacity=".86"/>
+      <stop offset=".7" stop-color="#031745" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#031745" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="buildingFace" x1=".1" y1="0" x2=".65" y2="1">
+      <stop stop-color="#117eaa"/>
+      <stop offset="1" stop-color="#072451"/>
+    </linearGradient>
+    <linearGradient id="tower" x1=".3" y1="0" x2=".5" y2="1">
+      <stop stop-color="#12d6f0"/>
+      <stop offset=".62" stop-color="#09b7df"/>
+      <stop offset="1" stop-color="#06709c" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="roof" gradientUnits="userSpaceOnUse" x1="431" y1="260" x2="722" y2="665">
+      <stop stop-color="#f6fdff"/>
+      <stop offset=".4" stop-color="#d6f8ff"/>
+      <stop offset="1" stop-color="#04cbe9"/>
+    </linearGradient>
+    <linearGradient id="bus" gradientUnits="userSpaceOnUse" x1="185" y1="613" x2="570" y2="970">
+      <stop stop-color="#d9faff"/>
+      <stop offset=".48" stop-color="#05d9e7"/>
+      <stop offset="1" stop-color="#13edb9"/>
+    </linearGradient>
+    <linearGradient id="window" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#6ceaf6"/>
+      <stop offset="1" stop-color="#0ec7ec"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2=".15" y2="1">
+      <stop stop-color="#f0fbff"/>
+      <stop offset="1" stop-color="#a9e9f4"/>
+    </linearGradient>
+    <clipPath id="tileClip"><rect x="42" y="56" width="1160" height="1154" rx="250"/></clipPath>
+  </defs>
+  <g id="background-tile" clip-path="url(#tileClip)">
+    <rect x="42" y="56" width="1160" height="1154" fill="url(#background)"/>
+    <rect x="42" y="56" width="1160" height="1154" fill="url(#blueShade)"/>
+  </g>
+  <g id="architecture">
+    <!-- Tower: the two faces are independent editable shapes. -->
+    <path d="M562 310 Q562 288 580 279 L824 201 L824 555 L733 555 L562 426 Z" fill="url(#buildingFace)"/>
+    <path d="M829 196 Q838 193 850 201 L1078 336 Q1091 343 1091 359 L1091 790 L1060 790 L1060 399 L876 293 L876 756 L829 756 Z" fill="url(#tower)"/>
+    <g id="tower-windows" fill="url(#window)">
+      <path d="M891 343 L945 372 L945 485 L891 460 Z"/>
+      <path d="M962 382 L1004 405 L1004 508 L962 491 Z"/>
+      <path d="M1018 413 L1050 431 L1050 526 L1018 513 Z"/>
+      <path d="M891 517 L945 534 L945 635 L891 629 Z"/>
+      <path d="M962 539 L1004 552 L1004 640 L962 636 Z"/>
+      <path d="M1018 556 L1050 566 L1050 643 L1018 641 Z"/>
+    </g>
+    <path id="tower-roof" d="M562 357 L562 303 Q562 289 580 281 L819 199 Q830 194 830 206 L830 572 L738 572 Q728 572 719 565 L486 406 L163 655 Q142 673 131 655 Q122 638 136 622 L472 350 Q484 341 499 351 L746 532 L795 532 L795 259 Z" fill="url(#roof)"/>
+    <path id="chimney" d="M313 486 L313 397 Q313 381 328 381 L365 381 Q380 381 380 396 L380 433 Z" fill="url(#roof)"/>
+    <!-- The left wall flows directly into the field bus. -->
+    <path id="bus-line" d="M192 622 L192 934 Q192 963 220 963 L959 963" fill="none" stroke="url(#bus)" stroke-width="37" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M343 852 V963 M546 852 V963 M749 852 V963 M958 852 V963" fill="none" stroke="#13ebba" stroke-width="23"/>
+    <g fill="#13ebba">
+      <circle cx="343" cy="963" r="34"/>
+      <circle cx="546" cy="963" r="34"/>
+      <circle cx="749" cy="963" r="34"/>
+      <circle cx="958" cy="963" r="34"/>
+    </g>
+  </g>
+  <g id="control-tiles" fill="url(#tile)">
+    <rect id="lighting-tile" x="249" y="667" width="184" height="203" rx="39"/>
+    <rect id="shading-tile" x="456" y="667" width="181" height="203" rx="39"/>
+    <rect id="temperature-tile" x="659" y="667" width="180" height="203" rx="39"/>
+    <rect id="ventilation-tile" x="865" y="667" width="185" height="203" rx="39"/>
+  </g>
+  <g id="lighting" fill="none" stroke="#051b43" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M325 810 L325 801 C325 790 307 781 307 759 A35 35 0 0 1 377 759 C377 781 358 790 358 801 L358 810 Z"/>
+    <path d="M331 833 H352 M342 693 V709 M295 712 L307 724 M273 759 H289 M378 724 L389 712 M395 759 H411"/>
+  </g>
+  <g id="shading" fill="#051b43">
+    <rect x="478" y="691" width="136" height="18"/>
+    <rect x="478" y="721" width="136" height="18"/>
+    <rect x="478" y="753" width="136" height="18"/>
+    <rect x="478" y="785" width="136" height="19"/>
+    <path d="M557 837 L579 811 L601 837 Z"/>
+  </g>
+  <g id="temperature" stroke="#051b43" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M726 787 V721 A17 17 0 0 1 760 721 V787 A29 29 0 1 1 726 787 Z" fill="none"/>
+    <path d="M743 723 V806" fill="none" stroke-width="9"/>
+    <circle cx="743" cy="813" r="14" fill="#051b43" stroke="none"/>
+    <path d="M783 728 H809 M783 751 H809 M783 775 H809" fill="none"/>
+  </g>
+  <g id="ventilation" fill="#051b43">
+    <path d="M946 759 C930 737 934 714 956 704 C975 696 997 704 992 728 C990 742 974 761 968 767 C961 760 953 758 946 759 Z"/>
+    <path d="M941 773 C920 760 900 769 891 788 C881 812 893 832 914 831 C930 831 950 814 955 794 C947 790 942 781 941 773 Z"/>
+    <path d="M977 774 C997 766 1019 774 1025 792 C1034 817 1018 837 997 830 C982 825 970 808 964 795 C973 790 977 782 977 774 Z"/>
+    <circle cx="959" cy="777" r="11"/>
+  </g>
+</svg>
