@@ -921,7 +921,6 @@ fn write_download_log(ia: u16, lines: &[String]) -> Option<std::path::PathBuf> {
     if cfg!(test) {
         return None;
     }
-    std::env::var_os("APPDATA")?;
     let dir = crate::app::data_dir().join("logs");
     std::fs::create_dir_all(&dir).ok()?;
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);

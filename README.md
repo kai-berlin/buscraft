@@ -1,6 +1,7 @@
 # BusCraft
 
 A desktop tool for planning and commissioning KNX building installations, written in Rust with egui.
+It runs on Windows, Linux and macOS and works on its own – no other KNX software is needed.
 
 - Projects with topology, buildings, group addresses and devices in flexible stacked panels
 - Import of `.knxproj` projects and `.knxprod` product files
@@ -8,13 +9,34 @@ A desktop tool for planning and commissioning KNX building installations, writte
 - Group monitor, bus monitor, writing and reading group values
 - Programming individual addresses and downloading applications
 
-## Build
+## Build on Linux
+
+1. Install a C linker and Rust (once):
+
+   ```
+   sudo apt install build-essential git          # Debian/Ubuntu; Fedora: sudo dnf install gcc git
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+
+2. Get the code and build it:
+
+   ```
+   git clone git@github.com:kai-berlin/buscraft.git
+   cd buscraft
+   cargo build --release
+   ./target/release/buscraft
+   ```
+
+The first build downloads and compiles the libraries and takes a few minutes. File dialogs use
+the desktop's portal (`xdg-desktop-portal`), which GNOME and KDE already have.
+
+## Build on Windows
 
 ```
 cargo build --release
 ```
 
-On Windows with the GNU Rust toolchain, a complete MinGW `dlltool` is needed. Point to it in
+With the GNU Rust toolchain, a complete MinGW `dlltool` is needed. Point to it in
 `.cargo/config.toml` (not part of the repository), for example:
 
 ```toml
@@ -22,4 +44,25 @@ On Windows with the GNU Rust toolchain, a complete MinGW `dlltool` is needed. Po
 rustflags = ["-C", "dlltool=C:/path/to/mingw64/bin/dlltool.exe"]
 ```
 
+## Moving to another computer
+
+The code is in this repository; your projects and imported products are stored locally:
+
+| System  | Data folder |
+|---------|-------------|
+| Windows | `%APPDATA%\BusCraft` |
+| Linux   | `~/.local/share/BusCraft` |
+| macOS   | `~/Library/Application Support/BusCraft` |
+
+1. On the old computer: **Settings → Data → Back up everything…** saves one `.zip` file.
+2. Copy that file to the new computer (USB stick, cloud drive, …).
+3. On the new computer: **Settings → Data → Restore a backup…** and choose the file.
+
+Product files (`.knxprod`) and projects (`.knxproj`) only need to be imported again if you
+didn't make a backup. For the bus, the new computer must reach the KNX IP interface or router on the
+network (UDP port 3671).
+
+## Other
+
 Run `buscraft --screenshot out.png` to render one frame to a picture and exit.
+`cargo test` runs the tests; some extra tests use sample files in `../reference` when present.

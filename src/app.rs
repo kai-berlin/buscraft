@@ -422,12 +422,23 @@ pub struct App {
     /// A download waiting for re-imported product data: (project id, device, kind).
     pub pending_download: Option<(u64, u32, crate::bus::JobKind)>,
     pub retry_download: bool,
+    /// A backup file waiting for confirmation before it replaces the local data: (file, description).
+    pub confirm_restore: Option<(PathBuf, String)>,
 }
 
 /// The app's data folder (projects, product library, download logs).
 /// A folder from the app's earlier name is taken over once, so nothing is lost.
+/// Windows: %APPDATA%\BusCraft · Linux: ~/.local/share/BusCraft · macOS: ~/Library/Application Support/BusCraft
 pub fn data_dir() -> PathBuf {
-    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let home = || env("HOME").unwrap_or_else(|| PathBuf::from("."));
+    let base = if cfg!(windows) {
+        env("APPDATA").unwrap_or_else(|| PathBuf::from("."))
+    } else if cfg!(target_os = "macos") {
+        home().join("Library").join("Application Support")
+    } else {
+        env("XDG_DATA_HOME").unwrap_or_else(|| home().join(".local").join("share"))
+    };
     let dir = base.join("BusCraft");
     let old = base.join("BusPlanStudio");
     if !dir.exists() && old.exists() && std::fs::rename(&old, &dir).is_err() {
@@ -482,6 +493,7 @@ impl App {
             problem: None,
             pending_download: None,
             retry_download: false,
+            confirm_restore: None,
             screen: Screen::Overview,
             ov_tab: OvTab::Projects,
             ov_sel,
@@ -575,6 +587,10 @@ impl App {
                 lines.extend(crate::knx::check_report(2, 0x36DC, &asc, &asc));
                 lines.extend(crate::knx::check_report(4, 0x3F6E, &app_dev, &app_exp));
                 self.report_view = Some(("Device check 1.1.28 Example device".into(), lines.join("\n")));
+            }
+            "settings" => {
+                self.screen = Screen::Overview;
+                self.ov_tab = OvTab::Settings;
             }
             "bus" => {
                 self.screen = Screen::Overview;
@@ -838,6 +854,7 @@ impl App {
         }
         self.report_dialog(&ctx);
         self.problem_dialog(&ctx);
+        self.restore_dialog(&ctx);
         for n in std::mem::take(&mut self.bus.notices) {
             self.say(n);
         }
@@ -1392,7 +1409,21 @@ impl App {
             ui.label(RichText::new(format!("{} imported product(s) in the library. The language applies to future imports.", self.library.products.len())).small().color(theme::MUTED));
             ui.add_space(8.0);
             theme::section(ui, "Data");
-            ui.label(RichText::new(format!("Projects are saved automatically to {}", store_path().display())).color(theme::MUTED).small());
+            ui.label(RichText::new(format!("Projects and imported products are saved automatically in {}", data_dir().display())).color(theme::MUTED).small());
+            ui.add_space(4.0);
+            ui.label("Moving to another computer (Windows, Linux or macOS): make a backup here, copy the file over, and restore it there.");
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("💾 Back up everything…").on_hover_text("All projects, imported products and download logs in one .zip file").clicked() {
+                    self.backup_all();
+                }
+                if ui.button("⟲ Restore a backup…").on_hover_text("Replace the projects and products on this computer with a backup").clicked() {
+                    self.pick_restore();
+                }
+                if ui.button("📂 Open data folder").clicked() {
+                    open_folder(&data_dir());
+                }
+            });
+            ui.add_space(6.0);
             if ui.button("Add sample project").clicked() {
                 let p = sample_project(&self.catalog);
                 let mut p = p;
@@ -1403,6 +1434,83 @@ impl App {
                 self.say("Sample project added");
             }
         });
+    }
+
+    fn backup_all(&mut self) {
+        if self.shot.is_some() {
+            return;
+        }
+        self.save();
+        let day = crate::model::fmt_time(crate::model::now_secs()).split(' ').next().unwrap_or("").to_string();
+        let Some(path) = rfd::FileDialog::new().add_filter("BusCraft backup", &["zip"]).set_file_name(format!("BusCraft-backup-{day}.zip")).save_file() else { return };
+        match crate::backup::create(&data_dir(), &path) {
+            Ok(n) => self.say(format!("Backup saved: {} ({n} files)", path.display())),
+            Err(e) => self.say(e),
+        }
+    }
+
+    fn pick_restore(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("BusCraft backup", &["zip"]).pick_file() else { return };
+        match crate::backup::describe(&path) {
+            Ok(d) => self.confirm_restore = Some((path, d)),
+            Err(e) => self.say(e),
+        }
+    }
+
+    /// Confirmation for restoring a backup, then the restore and reloading everything.
+    fn restore_dialog(&mut self, ctx: &egui::Context) {
+        let Some((path, desc)) = self.confirm_restore.clone() else { return };
+        let mut close = false;
+        let mut go = false;
+        egui::Window::new("Restore a backup").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+            ui.set_max_width(460.0);
+            ui.label(RichText::new(path.display().to_string()).strong());
+            ui.label(RichText::new(desc).small().color(theme::MUTED));
+            ui.add_space(6.0);
+            ui.label("The projects and imported products on this computer are replaced by the ones in the backup. The current state is kept as a safety copy in the data folder (backups).");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button(RichText::new("Restore").strong()).clicked() {
+                    go = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+            });
+        });
+        if go {
+            self.confirm_restore = None;
+            self.save();
+            match crate::backup::restore(&path, &data_dir()) {
+                Ok((n, _)) => {
+                    self.reload_data();
+                    self.say(format!("Backup restored ({n} files) – {} project(s)", self.store.projects.len()));
+                }
+                Err(e) => self.say(e),
+            }
+        } else if close {
+            self.confirm_restore = None;
+        }
+    }
+
+    /// Load projects and the product library again from the data folder.
+    fn reload_data(&mut self) {
+        self.library = crate::library::Library::load(Some(crate::library::Library::default_dir()));
+        let mut cat = catalog();
+        cat.extend(self.library.products.iter().cloned());
+        self.catalog = cat;
+        if let Some(s) = std::fs::read_to_string(store_path()).ok().and_then(|s| serde_json::from_str::<Store>(&s).ok()) {
+            self.store = s;
+        }
+        self.screen = Screen::Overview;
+        self.ov_sel = self.store.projects.first().map(|p| p.id);
+        self.ws = Ws::default();
+        self.tabs = vec![Ws::default()];
+        self.active_tab = 0;
+        self.undo.clear();
+        self.redo.clear();
+        self.theme_applied = false;
+        self.dirty = false;
     }
 
     /// Catalog browser. Returns the index of a product the user wants to add.
@@ -1696,4 +1804,17 @@ pub fn logo(ui: &mut egui::Ui) {
     p.line_segment([c + egui::vec2(-6.0, 5.0), c + egui::vec2(-6.0, -5.0)], s);
     p.line_segment([c + egui::vec2(0.0, 5.0), c + egui::vec2(0.0, -2.0)], s);
     p.line_segment([c + egui::vec2(6.0, 5.0), c + egui::vec2(6.0, -6.0)], s);
+}
+
+/// Show a folder in the system's file manager.
+fn open_folder(dir: &std::path::Path) {
+    let _ = std::fs::create_dir_all(dir);
+    let cmd = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let _ = std::process::Command::new(cmd).arg(dir).spawn();
 }
