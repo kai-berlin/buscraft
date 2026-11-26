@@ -4,6 +4,8 @@ mod app;
 mod backup;
 mod bus;
 mod chrome;
+mod diag;
+mod diag_ui;
 mod dl_ui;
 mod dock;
 mod editor;

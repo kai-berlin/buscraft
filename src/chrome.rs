@@ -342,7 +342,37 @@ impl App {
                             self.open_dock(Dock::BusMonitor);
                             ui.close();
                         }
-                        if ui.button("Check individual addresses").clicked() {
+                        ui.separator();
+                        let sel_dev = match self.ws.p.sel {
+                            Sel::Device(d) => proj.device(d).filter(|d| d.has_app()).map(|d| d.address()),
+                            _ => None,
+                        };
+                        let sel_line = match self.ws.p.sel {
+                            Sel::Line(a, l) => Some(format!("{a}.{l}")),
+                            Sel::Device(d) => proj.device(d).map(|d| format!("{}.{}", d.area, d.line)),
+                            _ => None,
+                        };
+                        let mut show = |m: MonView, fill: Option<String>| {
+                            self.ws.pending_show = Some((View::Monitors, Some(m)));
+                            self.ws.diag_prefill = fill;
+                        };
+                        if ui.button("Device info").on_hover_text("Read a device's identity and load states from the bus").clicked() {
+                            show(MonView::DeviceInfo, sel_dev.clone());
+                            ui.close();
+                        }
+                        if ui.button("Programming mode").on_hover_text("See which devices are in programming mode, switch it on or off").clicked() {
+                            show(MonView::ProgMode, sel_dev.clone());
+                            ui.close();
+                        }
+                        if ui.button("Individual address check").on_hover_text("Find out whether a device answers at an address").clicked() {
+                            show(MonView::AddressCheck, sel_dev.clone());
+                            ui.close();
+                        }
+                        if ui.button("Line scan").on_hover_text("Find every device that answers on a line").clicked() {
+                            show(MonView::LineScan, sel_line.clone());
+                            ui.close();
+                        }
+                        if ui.button("Find duplicate addresses in the project").clicked() {
                             self.check_addresses(proj);
                             ui.close();
                         }

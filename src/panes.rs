@@ -144,6 +144,10 @@ impl App {
                     MonView::GroupMonitor => self.monitor(ui, proj, false),
                     MonView::BusMonitor => self.monitor(ui, proj, true),
                     MonView::Jobs => self.jobs_view(ui, proj),
+                    MonView::DeviceInfo => self.diag_page(ui, proj, crate::diag::DiagPage::Info),
+                    MonView::ProgMode => self.diag_page(ui, proj, crate::diag::DiagPage::Prog),
+                    MonView::AddressCheck => self.diag_page(ui, proj, crate::diag::DiagPage::Check),
+                    MonView::LineScan => self.diag_page(ui, proj, crate::diag::DiagPage::Scan),
                 },
                 _ => {
                     if let Some(dev) = self.ws.p.open_device {
@@ -182,6 +186,18 @@ impl App {
         }
         ui.add_space(6.0);
         section(ui, "Diagnostics");
+        if crate::knxedit::page_item(ui, "Device Info", 1, false, self.ws.p.mon_view == MonView::DeviceInfo).clicked() {
+            self.ws.p.mon_view = MonView::DeviceInfo;
+        }
+        let ia_open = matches!(self.ws.p.mon_view, MonView::ProgMode | MonView::AddressCheck | MonView::LineScan);
+        if crate::knxedit::page_item(ui, "Individual Addresses", 0, true, false).clicked() && !ia_open {
+            self.ws.p.mon_view = MonView::ProgMode;
+        }
+        for (m, t) in [(MonView::ProgMode, "Programming Mode"), (MonView::AddressCheck, "Individual Address Check"), (MonView::LineScan, "Line Scan")] {
+            if crate::knxedit::page_item(ui, t, 1, false, self.ws.p.mon_view == m).clicked() {
+                self.ws.p.mon_view = m;
+            }
+        }
         let pending = self.bus.jobs.iter().filter(|j| matches!(j.state, crate::bus::JobState::Waiting | crate::bus::JobState::PressButton | crate::bus::JobState::Running)).count();
         let jt = if pending > 0 { format!("Pending Operations ({pending})") } else { "Pending Operations".into() };
         if crate::knxedit::page_item(ui, &jt, 1, false, self.ws.p.mon_view == MonView::Jobs).clicked() {
@@ -243,6 +259,15 @@ impl App {
                 }
                 p.size = 260.0;
                 self.ws.panes.push(p);
+            }
+        }
+        if let Some(t) = self.ws.diag_prefill.take() {
+            for p in self.ws.panes.iter_mut().filter(|p| p.view == View::Monitors) {
+                match p.mon_view {
+                    MonView::LineScan => p.diag_line = t.clone(),
+                    MonView::DeviceInfo | MonView::AddressCheck | MonView::ProgMode => p.diag_addr = t.clone(),
+                    _ => {}
+                }
             }
         }
         self.ws.focus = focus.min(self.ws.panes.len() - 1);

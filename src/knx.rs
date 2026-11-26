@@ -411,6 +411,7 @@ pub enum Cmd {
     Send(Frame),
     ProgramAddress { job: u64, new_ia: u16 },
     Download { job: u64, ia: u16, steps: Vec<crate::knxload::Step> },
+    Diag { job: u64, req: crate::diag::DiagReq },
     Close,
 }
 
@@ -430,6 +431,8 @@ pub enum Event {
     Job { job: u64, phase: Phase, progress: f32, msg: String },
     /// Result text of a device check.
     Report { job: u64, lines: Vec<String> },
+    /// Progress or result of a diagnostic.
+    Diag(crate::diag::DiagUpdate),
 }
 
 pub struct Link {
@@ -463,6 +466,9 @@ impl Link {
     }
     pub fn download(&self, job: u64, ia: u16, steps: Vec<crate::knxload::Step>) {
         let _ = self.tx.send(Cmd::Download { job, ia, steps });
+    }
+    pub fn diag(&self, job: u64, req: crate::diag::DiagReq) {
+        let _ = self.tx.send(Cmd::Diag { job, req });
     }
     pub fn close(&self) {
         let _ = self.tx.send(Cmd::Close);
@@ -599,6 +605,10 @@ impl Conn {
                         Err(e) => (Phase::Failed, e),
                     };
                     let _ = self.ev.send(Event::Job { job, phase, progress: 1.0, msg });
+                }
+                Ok(Cmd::Diag { job, req }) => {
+                    let done = self.diag(job, req);
+                    let _ = self.ev.send(Event::Diag(crate::diag::DiagUpdate { job, progress: 1.0, done: Some(done), ..Default::default() }));
                 }
                 Ok(Cmd::Close) | Err(TryRecvError::Disconnected) => {
                     self.disconnect();
@@ -1331,6 +1341,169 @@ impl Conn {
             done += s.weight();
         }
         Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ diagnostics
+
+impl Conn {
+    fn diag_update(&self, job: u64, progress: f32, msg: &str, info: Vec<(String, String)>, hits: Vec<crate::diag::ScanHit>) {
+        let _ = self.ev.send(Event::Diag(crate::diag::DiagUpdate { job, progress, msg: msg.into(), info, hits, done: None }));
+    }
+
+    /// Run one diagnostic; returns the summary for the result line.
+    fn diag(&mut self, job: u64, req: crate::diag::DiagReq) -> Result<String, String> {
+        use crate::diag::{DiagReq, ScanHit};
+        match req {
+            DiagReq::DeviceInfo(ia) => self.device_info(job, ia),
+            DiagReq::ProgScan => {
+                let v = self.read_prog_mode()?;
+                let hits = v.iter().map(|a| ScanHit { ia: *a, mask: None }).collect();
+                self.diag_update(job, 0.9, "", vec![], hits);
+                Ok(match v.len() {
+                    0 => "No device is in programming mode".into(),
+                    1 => "1 device is in programming mode".into(),
+                    n => format!("{n} devices are in programming mode"),
+                })
+            }
+            DiagReq::SetProg(ia, on) => self.set_prog_mode(ia, on),
+            DiagReq::Check(ia) => match self.probe(ia)? {
+                None => Ok(format!("No device answers at {} – the address is free", fmt_ia(ia))),
+                Some(mask) => {
+                    let info = mask.map(|m| vec![("Mask version".to_string(), crate::diag::mask_text(m))]).unwrap_or_default();
+                    self.diag_update(job, 0.9, "", info, vec![ScanHit { ia, mask }]);
+                    Ok(format!("A device answers at {}", fmt_ia(ia)))
+                }
+            },
+            DiagReq::LineScan { area, line, cancel } => {
+                let mut found = 0usize;
+                for n in 0..=255u16 {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Ok(format!("Stopped at {area}.{line}.{n} – {found} device(s) found"));
+                    }
+                    let ia = ((area as u16) << 12) | ((line as u16) << 8) | n;
+                    let hit = self.probe(ia)?.map(|mask| ScanHit { ia, mask });
+                    if hit.is_some() {
+                        found += 1;
+                    }
+                    self.diag_update(job, (n + 1) as f32 / 256.0, &format!("Scanning {} – {found} found", fmt_ia(ia)), vec![], hit.into_iter().collect());
+                }
+                Ok(format!("Line {area}.{line} scanned: {found} device(s) answered"))
+            }
+        }
+    }
+
+    /// Is there a device at `ia`? Some(mask version if it told us) or None.
+    /// Opens a connection, asks for the device descriptor and closes again.
+    fn probe(&mut self, ia: u16) -> Result<Option<Option<u16>>, String> {
+        use crate::diag::{PROBE_ACK_WAIT_MS, PROBE_ANSWER_WAIT_MS};
+        self.send_frame(&Frame::request(ia, false, vec![0x80]))?; // T_Connect
+        self.send_frame(&Frame::request(ia, false, vec![0x43, 0x00]))?; // DeviceDescriptor_Read, seq 0
+        let mut acked = false;
+        let mut mask = None;
+        let mut end = Instant::now() + Duration::from_millis(PROBE_ACK_WAIT_MS);
+        while Instant::now() < end && mask.is_none() {
+            let Some(f) = self.wait_for(Duration::from_millis(30), |f| f.src == ia && !f.is_group())? else { continue };
+            if f.tpdu.len() == 1 && f.tpdu[0] & 0xC3 == 0xC2 {
+                if !acked {
+                    acked = true;
+                    end = Instant::now() + Duration::from_millis(PROBE_ANSWER_WAIT_MS);
+                }
+            } else if f.tpdu.len() == 1 && f.tpdu[0] == 0x81 {
+                acked = true; // busy with another connection, but it exists
+                break;
+            } else if f.service() == 0x340 && f.tpdu.len() >= 4 {
+                mask = Some(u16::from_be_bytes([f.tpdu[2], f.tpdu[3]]));
+                let seq = (f.tpdu[0] >> 2) & 0x0f;
+                let _ = self.send_frame(&Frame::request(ia, false, vec![0xC2 | (seq << 2)])); // T_ACK
+            }
+        }
+        let _ = self.send_frame(&Frame::request(ia, false, vec![0x81])); // T_Disconnect
+        Ok(if acked || mask.is_some() { Some(mask) } else { None })
+    }
+
+    fn device_info(&mut self, job: u64, ia: u16) -> Result<String, String> {
+        use crate::diag::*;
+        let target = fmt_ia(ia);
+        let mut tc = Tc { dst: ia, seq: 0, last_rx: None };
+        self.tc_send(ia, vec![0x80])?;
+        let r = self
+            .tc_request(&mut tc, &[0x03, 0x00], Some(Want::Class(0x340)))
+            .map_err(|_| format!("No device answers at {target}"))?
+            .ok_or_else(|| format!("No device answers at {target}"))?;
+        let mask = r.tpdu.get(2..4).map(|b| u16::from_be_bytes([b[0], b[1]])).unwrap_or(0);
+        let rows = vec![("Individual address".to_string(), target.clone()), ("Mask version".to_string(), mask_text(mask))];
+        self.diag_update(job, 0.15, "Reading identity…", rows, vec![]);
+        let na = || "not available".to_string();
+        let result = (|| -> Result<(), String> {
+            if uses_properties(mask) {
+                let steps: [(&str, u8); 6] = [("Manufacturer", 12), ("Order number", 15), ("Serial number", 11), ("Hardware type", 78), ("Firmware revision", 9), ("Programming mode", 54)];
+                for (i, (name, pid)) in steps.iter().enumerate() {
+                    let text = match (self.prop_read(&mut tc, 0, *pid, 1, 1), *pid) {
+                        (Ok(b), 12) if b.len() >= 2 => format!("M-{:04X}", u16::from_be_bytes([b[0], b[1]])),
+                        (Ok(b), 15) if !b.is_empty() => order_text(&b),
+                        (Ok(b), 11) if !b.is_empty() => serial_text(&b),
+                        (Ok(b), 9) if !b.is_empty() => b[0].to_string(),
+                        (Ok(b), 54) if !b.is_empty() => if b[0] & 1 != 0 { "On".into() } else { "Off".into() },
+                        (Ok(b), _) if !b.is_empty() => hex(&b),
+                        _ => na(),
+                    };
+                    self.diag_update(job, 0.2 + i as f32 * 0.08, &format!("Reading {}…", name.to_lowercase()), vec![(name.to_string(), text)], vec![]);
+                }
+                let app = match self.prop_read(&mut tc, 4, 13, 1, 1) {
+                    Ok(b) if b.len() >= 5 => format!("M-{:04X}, number {:04X}, version {}.{}", u16::from_be_bytes([b[0], b[1]]), u16::from_be_bytes([b[2], b[3]]), b[4] >> 4, b[4] & 0x0f),
+                    Ok(b) if !b.is_empty() => hex(&b),
+                    _ => na(),
+                };
+                self.diag_update(job, 0.75, "Reading load states…", vec![("Application program".into(), app)], vec![]);
+                for (name, obj) in [("Group address table", 1u8), ("Association table", 2), ("Application", 4)] {
+                    let s = match self.prop_read(&mut tc, obj, 5, 1, 1) {
+                        Ok(b) if !b.is_empty() => load_state_text(b[0]),
+                        _ => na(),
+                    };
+                    self.diag_update(job, 0.85, "", vec![(name.into(), s)], vec![]);
+                }
+            } else {
+                // System 1/2: identity and programming mode live at fixed memory addresses.
+                let prog = match self.mem_read(&mut tc, 0x0060, 1) {
+                    Ok(b) if !b.is_empty() => if b[0] & 1 != 0 { "On".into() } else { "Off".into() },
+                    _ => na(),
+                };
+                let app = match self.mem_read(&mut tc, 0x0104, 4) {
+                    Ok(b) if b.len() >= 4 => format!("M-{:04X}, device type {:04X}, version {}", b[0], u16::from_be_bytes([b[1], b[2]]), b[3]),
+                    _ => na(),
+                };
+                self.diag_update(job, 0.8, "", vec![("Programming mode".into(), prog), ("Application program".into(), app)], vec![]);
+            }
+            Ok(())
+        })();
+        let _ = self.tc_send(ia, vec![0x81]);
+        result?;
+        Ok(format!("Device info read from {target}"))
+    }
+
+    fn set_prog_mode(&mut self, ia: u16, on: bool) -> Result<String, String> {
+        let target = fmt_ia(ia);
+        let mut tc = Tc { dst: ia, seq: 0, last_rx: None };
+        self.tc_send(ia, vec![0x80])?;
+        let r = (|| -> Result<(), String> {
+            let d = self.tc_request(&mut tc, &[0x03, 0x00], Some(Want::Class(0x340)))?.ok_or("no answer")?;
+            let mask = d.tpdu.get(2..4).map(|b| u16::from_be_bytes([b[0], b[1]])).unwrap_or(0);
+            if crate::diag::uses_properties(mask) && self.prop_write(&mut tc, 0, 54, 1, &[on as u8]).is_ok() {
+                return Ok(());
+            }
+            // Memory 0x60: bit 0 programming mode, bit 7 parity.
+            self.mem_write(&mut tc, 0x0060, &[if on { 0x81 } else { 0x00 }])
+        })();
+        let _ = self.tc_send(ia, vec![0x81]);
+        r.map_err(|e| format!("{target}: {e}"))?;
+        // Confirm with a programming mode search.
+        let now = self.read_prog_mode()?;
+        if now.contains(&ia) == on {
+            Ok(format!("Programming mode of {target} switched {}", if on { "on" } else { "off" }))
+        } else {
+            Err(format!("{target} accepted the request but its programming mode is still {}", if on { "off" } else { "on" }))
+        }
     }
 }
 

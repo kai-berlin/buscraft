@@ -432,3 +432,47 @@ fn group_object_table_positions() {
     // association: object 14 with the first group address
     assert_eq!(img.by_obj[&2], vec![0, 1, 0, 1, 0, 14]);
 }
+/// Diagnostics over a (fake) KNXnet/IP tunnel: device info of a System B device,
+/// an address check of an unused address and a programming mode search.
+#[test]
+fn diagnostics_on_a_tunnel() {
+    use crate::diag::{DiagReq, DiagUpdate};
+    let mut fake = FakeDevice { ia: 0x1114, state: HashMap::new(), ptr: HashMap::new(), next_free: 0x4000, mem: HashMap::new(), seq_out: 0, log: vec![], prefill: false };
+    fake.state.insert(4, 1);
+    let (addr, h) = run_fake_interface(fake);
+    let link = Link::open(Endpoint::Tunnel(addr));
+    assert!(matches!(link.rx.recv_timeout(Duration::from_secs(5)).unwrap(), Event::Connected { .. }));
+    let run = |link: &Link, job: u64, req: DiagReq| -> (Result<String, String>, Vec<DiagUpdate>) {
+        link.diag(job, req);
+        let mut ups = vec![];
+        loop {
+            match link.rx.recv_timeout(Duration::from_secs(60)).unwrap() {
+                Event::Diag(u) if u.job == job => {
+                    if let Some(r) = u.done.clone() {
+                        return (r, ups);
+                    }
+                    ups.push(u);
+                }
+                _ => {}
+            }
+        }
+    };
+    let (r, ups) = run(&link, 1, DiagReq::DeviceInfo(0x1114));
+    assert_eq!(r.unwrap(), "Device info read from 1.1.20");
+    let info: Vec<(String, String)> = ups.into_iter().flat_map(|u| u.info).collect();
+    let get = |k: &str| info.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap_or_default();
+    assert!(get("Mask version").contains("System B"), "{info:?}");
+    assert_eq!(get("Application"), "Loaded");
+    assert_eq!(get("Group address table"), "Unloaded");
+    assert_eq!(get("Serial number"), "not available");
+
+    let (r, ups) = run(&link, 2, DiagReq::Check(0x1114));
+    assert_eq!(r.unwrap(), "A device answers at 1.1.20");
+    assert_eq!(ups.iter().flat_map(|u| u.hits.iter()).next().unwrap().mask, Some(0x07B0));
+    let (r, _) = run(&link, 3, DiagReq::Check(0x1115));
+    assert!(r.unwrap().contains("free"));
+    let (r, _) = run(&link, 4, DiagReq::ProgScan);
+    assert_eq!(r.unwrap(), "No device is in programming mode");
+    link.close();
+    let _ = h.join();
+}

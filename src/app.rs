@@ -80,6 +80,10 @@ pub enum MonView {
     GroupMonitor,
     BusMonitor,
     Jobs,
+    DeviceInfo,
+    ProgMode,
+    AddressCheck,
+    LineScan,
 }
 
 fn d_true() -> bool {
@@ -151,6 +155,15 @@ pub struct Pane {
     pub mon_view: MonView,
     #[serde(default = "d_true")]
     pub show_ifaces: bool,
+    /// Diagnostics: address and line typed in, repeated programming mode search.
+    #[serde(default)]
+    pub diag_addr: String,
+    #[serde(default)]
+    pub diag_line: String,
+    #[serde(skip)]
+    pub diag_auto: bool,
+    #[serde(skip)]
+    pub diag_next: f64,
     #[serde(skip)]
     pub back: Vec<(View, Sel)>,
     #[serde(skip)]
@@ -193,6 +206,10 @@ impl Pane {
             mon_sel: None,
             mon_view: MonView::GroupMonitor,
             show_ifaces: true,
+            diag_addr: String::new(),
+            diag_line: String::new(),
+            diag_auto: false,
+            diag_next: 0.0,
             back: vec![],
             fwd: vec![],
             last: (view, Sel::None),
@@ -241,6 +258,9 @@ pub struct Ws {
     /// Link requested by drag & drop: (device, object index, group address).
     #[serde(skip)]
     pub pending_link: Option<(u32, usize, u32)>,
+    /// Address or line to fill in on the diagnostics page shown by `pending_show`.
+    #[serde(skip)]
+    pub diag_prefill: Option<String>,
 }
 
 fn d_prop_tab() -> PropTab {
@@ -288,6 +308,7 @@ impl Ws {
             pane_ops: vec![],
             last_tree: (View::Topology, Sel::None),
             pending_link: None,
+            diag_prefill: None,
         }
     }
 
@@ -633,6 +654,36 @@ impl App {
                     }
                 }
                 self.ws.panes[1] = Pane::monitors(MonView::Jobs);
+            }
+            "scan" | "devinfo" | "progmode" | "check" => {
+                // Diagnostics pages, with addresses programmed in the simulated installation.
+                let pi = self.store.projects.iter().position(|p| p.id == id).unwrap_or(0);
+                for d in self.store.projects[pi].devices.iter_mut() {
+                    d.adr_ok = d.has_app();
+                }
+                let mut p = self.store.projects[pi].clone();
+                let first = p.devices.iter().find(|d| d.has_app() && d.area == 1 && d.line == 1).map(|d| d.address()).unwrap_or_default();
+                let dimmer = dev.and_then(|d| p.device(d)).map(|d| d.address()).unwrap_or(first.clone());
+                let (kind, target, view) = match what {
+                    "scan" => (crate::diag::DiagKind::LineScan, "1.1".to_string(), MonView::LineScan),
+                    "devinfo" => (crate::diag::DiagKind::DeviceInfo, dimmer.clone(), MonView::DeviceInfo),
+                    "check" => (crate::diag::DiagKind::Check, "1.1.30".to_string(), MonView::AddressCheck),
+                    _ => (crate::diag::DiagKind::SetProg(true), first.clone(), MonView::ProgMode),
+                };
+                let _ = self.bus.start_diag(kind, &target);
+                for _ in 0..80 {
+                    self.bus.tick(0.1, Some(&mut p));
+                }
+                if what == "progmode" {
+                    let _ = self.bus.start_diag(crate::diag::DiagKind::ProgScan, "");
+                    for _ in 0..40 {
+                        self.bus.tick(0.1, Some(&mut p));
+                    }
+                }
+                self.ws.p = Pane::monitors(view);
+                self.ws.p.diag_addr = target.clone();
+                self.ws.p.diag_line = "1.1".into();
+                self.ws.panes.truncate(1);
             }
             "monitors" => {
                 // Monitors in the first panel, like the original's monitor view

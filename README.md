@@ -8,6 +8,8 @@ It runs on Windows, Linux and macOS and works on its own – no other KNX softwa
 - Bus connection over KNXnet/IP (tunnelling and routing) or a built-in simulation
 - Group monitor, bus monitor, writing and reading group values
 - Programming individual addresses and downloading applications
+- Diagnostics (Monitors panel or **Diagnostics ▾** in the toolbar): device info, devices in
+  programming mode (switch it on or off), individual address check and line scan
 
 ## Build on Linux
 

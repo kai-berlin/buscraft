@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "values": [
+    {"name": "device descriptor read service", "group": "diagnostics", "value": "0x300 (answer 0x340)", "source": "KNX standard; knx.rs probe/device_info"},
+    {"name": "manufacturer property", "group": "diagnostics", "value": 12, "unit": "PID of object 0", "source": "KNX standard"},
+    {"name": "serial number property", "group": "diagnostics", "value": 11, "unit": "PID of object 0", "source": "KNX standard"},
+    {"name": "order info property", "group": "diagnostics", "value": 15, "unit": "PID of object 0", "source": "KNX standard"},
+    {"name": "firmware revision property", "group": "diagnostics", "value": 9, "unit": "PID of object 0", "source": "KNX standard"},
+    {"name": "hardware type property", "group": "diagnostics", "value": 78, "unit": "PID of object 0", "source": "KNX standard"},
+    {"name": "programming mode property", "group": "diagnostics", "value": 54, "unit": "PID of object 0", "source": "KNX standard"},
+    {"name": "application id property", "group": "diagnostics", "value": 13, "unit": "PID of object 4", "source": "KNX standard"},
+    {"name": "load state property", "group": "diagnostics", "value": 5, "unit": "PID of objects 1, 2, 4", "source": "KNX standard"},
+    {"name": "programming mode memory (System 1/2)", "group": "diagnostics", "value": "0x0060 bit 0", "source": "KNX standard"},
+    {"name": "programming mode search window", "group": "diagnostics", "value": 2.5, "unit": "s", "source": "knx.rs read_prog_mode"},
+    {"name": "programming mode repeat pause", "group": "diagnostics", "value": 3, "unit": "s", "estimated": true},
+    {"name": "probe acknowledgement wait", "group": "diagnostics", "value": 0.6, "unit": "s", "estimated": true},
+    {"name": "probe answer wait", "group": "diagnostics", "value": 1.5, "unit": "s", "estimated": true},
+    {"name": "line scan range", "group": "diagnostics", "value": "0-255", "source": "KNX standard (8-bit device number)"},
+    {"name": "factory individual address", "group": "simulation", "value": "15.15.255", "source": "KNX standard"},
+    {"name": "simulated mask version", "group": "simulation", "value": "07B0", "estimated": true},
+    {"name": "simulated line scan speed", "group": "simulation", "value": 64, "unit": "addresses/s", "estimated": true}
+  ]
+}

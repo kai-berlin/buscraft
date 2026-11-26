@@ -175,6 +175,11 @@ pub struct Bus {
     pub rng: Rng,
     pub jobs: Vec<Job>,
     next_job: u64,
+    /// Diagnostics (device info, programming mode, address check, line scan), newest last.
+    pub diags: Vec<crate::diag::DiagTask>,
+    pub(crate) next_diag: u64,
+    /// Simulation: addresses of devices whose programming mode is on.
+    pub sim_prog: std::collections::HashSet<u16>,
 }
 
 impl Bus {
@@ -211,6 +216,9 @@ impl Bus {
             rng: Rng::new(0x9E37_79B9_7F4A_7C15 ^ crate::model::now_secs()),
             jobs: vec![],
             next_job: 1,
+            diags: vec![],
+            next_diag: 1,
+            sim_prog: Default::default(),
         }
     }
 
@@ -261,6 +269,7 @@ impl Bus {
         }
         self.state = LinkState::Disconnected;
         self.connected = false;
+        self.fail_real_diags("Connection closed");
         for j in self.jobs.iter_mut().filter(|j| j.real && matches!(j.state, JobState::Waiting | JobState::PressButton | JobState::Running)) {
             j.state = JobState::Failed;
             j.message = "Connection closed".into();
@@ -321,6 +330,17 @@ impl Bus {
     }
 
     // ------------------------------------------------------------ telegrams
+
+    /// Hand a diagnostic to the link thread.
+    pub(crate) fn send_diag(&mut self, job: u64, req: crate::diag::DiagReq) -> Result<(), String> {
+        match &self.link {
+            Some(l) => {
+                l.diag(job, req);
+                Ok(())
+            }
+            None => Err("No bus connection".into()),
+        }
+    }
 
     fn time_str(&self) -> String {
         let t = self.clock;
@@ -541,6 +561,7 @@ impl Bus {
                     self.state = LinkState::Failed(msg.clone());
                     self.notices.push(format!("Bus connection failed: {msg}"));
                     self.fail_real_jobs(&msg);
+                    self.fail_real_diags(&msg);
                 }
                 Event::Closed(msg) => {
                     self.link = None;
@@ -550,8 +571,10 @@ impl Bus {
                     }
                     self.notices.push(format!("Bus connection closed: {msg}"));
                     self.fail_real_jobs(&msg);
+                    self.fail_real_diags(&msg);
                 }
                 Event::Frame(f) => self.log_frame(&f, proj.as_deref()),
+                Event::Diag(u) => self.apply_diag(u),
                 Event::Report { job, lines } => {
                     if let Some(j) = self.jobs.iter_mut().find(|j| j.id == job) {
                         let text = lines.join("\n");
@@ -603,6 +626,8 @@ impl Bus {
                 }
             }
         }
+
+        self.tick_diags(dt, proj.as_deref());
 
         let Some(proj) = proj else { return };
 
