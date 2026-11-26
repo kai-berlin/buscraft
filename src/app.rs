@@ -689,6 +689,14 @@ impl App {
                 // Monitors in the first panel, like the original's monitor view
                 self.ws.p = Pane::monitors(MonView::GroupMonitor);
                 self.ws.panes.truncate(1);
+                // A few telegrams, including time of day (10.001) and date (11.001)
+                if let Some(p) = self.store.projects.first() {
+                    let p = p.clone();
+                    for g in &p.addresses {
+                        let v = self.bus.random_value(&g.dpt);
+                        let _ = self.bus.send_group(&p, g.id, crate::bus::Service::Write, &v, None);
+                    }
+                }
             }
             "values" => {
                 // Group address list with last values, and one address with its linked objects

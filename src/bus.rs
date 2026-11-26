@@ -367,17 +367,18 @@ impl Bus {
     /// Send a group telegram from the interface (or, in the simulation, from a device).
     pub fn send_group(&mut self, proj: &Project, ga_id: u32, service: Service, value: &str, from: Option<&Device>) -> Result<(), String> {
         let Some(ga) = proj.ga(ga_id) else { return Err("Unknown group address".into()) };
+        let dpt = proj.value_dpt(ga);
         if self.is_real() {
             if self.state != LinkState::Connected {
                 return Err("Not connected to the bus".into());
             }
-            let (data, small) = if service == Service::Read { (vec![], true) } else { knx::encode_value(&ga.dpt, value)? };
+            let (data, small) = if service == Service::Read { (vec![], true) } else { knx::encode_value(&dpt, value)? };
             let mut f = Frame::request(ga.raw(), true, knx::group_tpdu(service.code(), &data, small));
             if let Some(l) = &self.link {
                 l.send(f.clone());
             }
             f.src = knx::parse_ia(&self.own_address).unwrap_or(0);
-            let info = if service == Service::Read { String::new() } else { format_value(&ga.dpt, &knx::decode_value(&ga.dpt, &data, small)) };
+            let info = if service == Service::Read { String::new() } else { format_value(&dpt, &knx::decode_value(&dpt, &data, small)) };
             self.push(Telegram {
                 seq: 0,
                 time: String::new(),
@@ -389,7 +390,7 @@ impl Bus {
                 dest_name: ga.name.clone(),
                 rout: f.hops(),
                 service: service.label(),
-                dpt: ga.dpt.clone(),
+                dpt: dpt.clone(),
                 info,
                 raw: f.raw_hex(),
             });
@@ -402,8 +403,13 @@ impl Bus {
             Some(d) => (d.address(), d.name.clone(), true),
             None => (self.iface().address.clone(), self.iface().name.clone(), false),
         };
-        let info = if service == Service::Read { String::new() } else { format_value(&ga.dpt, value) };
-        let (data, small) = if service == Service::Read { (vec![], true) } else { knx::encode_value(&ga.dpt, value).unwrap_or((vec![0], true)) };
+        let encoded = if service == Service::Read { Some((vec![], true)) } else { knx::encode_value(&dpt, value).ok() };
+        let info = match (&encoded, service) {
+            (_, Service::Read) => String::new(),
+            (Some((data, small)), _) => format_value(&dpt, &knx::decode_value(&dpt, data, *small)),
+            (None, _) => format_value(&dpt, value),
+        };
+        let (data, small) = encoded.unwrap_or((vec![0], true));
         let mut f = Frame::request(ga.raw(), true, knx::group_tpdu(service.code(), &data, small));
         f.code = knx::L_DATA_IND;
         f.src = knx::parse_ia(&src).unwrap_or(0);
@@ -418,7 +424,7 @@ impl Bus {
             dest_name: ga.name.clone(),
             rout: 6,
             service: service.label(),
-            dpt: ga.dpt.clone(),
+            dpt: dpt.clone(),
             info,
             raw: f.raw_hex(),
         });
@@ -427,7 +433,7 @@ impl Bus {
             for (dev, oi) in proj.links_of(ga_id) {
                 let d = proj.device(dev).unwrap();
                 if d.objects[oi].flags.r {
-                    let v = self.random_value(&ga.dpt);
+                    let v = self.random_value(&dpt);
                     let d = d.clone();
                     let _ = self.send_group(proj, ga_id, Service::Response, &v, Some(&d));
                     break;
@@ -445,7 +451,7 @@ impl Bus {
             .map(|d| d.name.clone())
             .unwrap_or_default();
         let (dest, dest_name, dpt) = if f.is_group() {
-            match proj.and_then(|p| p.addresses.iter().find(|g| g.raw() == f.dst).map(|g| (g.fmt(p.ga_style), g.name.clone(), g.dpt.clone()))) {
+            match proj.and_then(|p| p.addresses.iter().find(|g| g.raw() == f.dst).map(|g| (g.fmt(p.ga_style), g.name.clone(), p.value_dpt(g)))) {
                 Some(x) => x,
                 None => (knx::fmt_ga3(f.dst), String::new(), String::new()),
             }
@@ -499,6 +505,16 @@ impl Bus {
                 }
             }
             "20" => format!("{}", 1 + self.rng.below(4)),
+            // Time and date: a clock sends the current time (as a real KNX clock would).
+            "10" => {
+                let (_, _, _, wd, h, m, s) = knx::now_local();
+                knx::decode_time(&[(wd << 5) | h, m, s])
+            }
+            "11" => {
+                let (y, m, d, ..) = knx::now_local();
+                knx::decode_date(&[d, m, (y % 100) as u8])
+            }
+            "19" => knx::decode_datetime(&knx::encode_datetime("now").unwrap_or([0; 8])),
             _ => format!("{}", self.rng.below(256)),
         }
     }
@@ -645,7 +661,7 @@ impl Bus {
                     let (dev, oi) = senders[self.rng.below(senders.len() as u64) as usize];
                     let d = proj.device(dev).unwrap().clone();
                     let ga = d.objects[oi].links[0];
-                    let dpt = proj.ga(ga).map(|g| g.dpt.clone()).unwrap_or_default();
+                    let dpt = proj.ga(ga).map(|g| proj.value_dpt(g)).unwrap_or_default();
                     let v = self.random_value(&dpt);
                     let _ = self.send_group(proj, ga, Service::Write, &v, Some(&d));
                 }
@@ -836,5 +852,37 @@ pub fn format_value(dpt: &str, v: &str) -> String {
             _ => "Auto".into(),
         },
         _ => v.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod value_tests {
+    use super::*;
+
+    /// Time of day (10.001) and date (11.001) appear as readable values in the group monitor.
+    #[test]
+    fn monitor_shows_time_and_date() {
+        let cat = crate::model::catalog();
+        let mut p = crate::model::sample_project(&cat);
+        let mut bus = Bus::new();
+        let t = p.addresses.iter().find(|g| g.dpt.starts_with("10.001")).unwrap().id;
+        let d = p.addresses.iter().find(|g| g.dpt.starts_with("11.001")).unwrap().id;
+        bus.send_group(&p, t, Service::Write, "Tue 14:23:05", None).unwrap();
+        bus.send_group(&p, d, Service::Write, "25.11.2026", None).unwrap();
+        let n = bus.log.len();
+        assert_eq!(bus.log[n - 2].info, "Tue 14:23:05");
+        assert_eq!(bus.log[n - 1].info, "25.11.2026");
+        // "now" is sent as the current time, not as text
+        bus.send_group(&p, t, Service::Write, "now", None).unwrap();
+        assert!(bus.log.last().unwrap().info.contains(':'));
+
+        // An address without its own type takes the type of a linked object
+        let dev = p.devices.iter().position(|x| !x.objects.is_empty()).unwrap();
+        p.devices[dev].objects[0].dpt = "11.001 date".into();
+        p.devices[dev].objects[0].links.push(t);
+        p.ga_mut(t).unwrap().dpt.clear();
+        assert_eq!(p.value_dpt(p.ga(t).unwrap()), "11.001 date");
+        bus.send_group(&p, t, Service::Write, "01.02.2027", None).unwrap();
+        assert_eq!(bus.log.last().unwrap().info, "01.02.2027");
     }
 }

@@ -242,6 +242,9 @@ pub fn encode_value(dpt: &str, text: &str) -> Result<(Vec<u8>, bool), String> {
             Ok((vec![v.clamp(0.0, 255.0) as u8], false))
         }
         "9" => Ok((encode_f16(num()?).to_vec(), false)),
+        "10" => Ok((encode_time(t)?.to_vec(), false)),
+        "11" => Ok((encode_date(t)?.to_vec(), false)),
+        "19" => Ok((encode_datetime(t)?.to_vec(), false)),
         "14" => Ok(((num()? as f32).to_be_bytes().to_vec(), false)),
         "16" => {
             let mut b: Vec<u8> = t.bytes().filter(|c| c.is_ascii()).take(14).collect();
@@ -270,6 +273,9 @@ pub fn decode_value(dpt: &str, data: &[u8], small: bool) -> String {
         "5" if dpt.starts_with("5.001") => format!("{}", (first as f64 * 100.0 / 255.0).round()),
         "5" | "20" => format!("{first}"),
         "9" => format!("{:.2}", decode_f16(data)).trim_end_matches('0').trim_end_matches('.').to_string(),
+        "10" if data.len() >= 3 => decode_time(data),
+        "11" if data.len() >= 3 => decode_date(data),
+        "19" if data.len() >= 8 => decode_datetime(data),
         "14" if data.len() >= 4 => format!("{}", f32::from_be_bytes([data[0], data[1], data[2], data[3]])),
         "16" => String::from_utf8_lossy(data).trim_end_matches('\0').to_string(),
         _ => {
@@ -280,6 +286,133 @@ pub fn decode_value(dpt: &str, data: &[u8], small: bool) -> String {
             }
         }
     }
+}
+
+// ------------------------------------------------------------------ time and date (DPT 10, 11, 19)
+
+const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/// DPT 10.001 time of day: NNNHHHHH 00MMMMMM 00SSSSSS (day 1 = Monday … 7 = Sunday, 0 = no day).
+pub fn decode_time(d: &[u8]) -> String {
+    let day = d[0] >> 5;
+    let (h, m, s) = (d[0] & 0x1f, d[1] & 0x3f, d[2] & 0x3f);
+    if (1..=7).contains(&day) {
+        format!("{} {h:02}:{m:02}:{s:02}", WEEKDAYS[day as usize - 1])
+    } else {
+        format!("{h:02}:{m:02}:{s:02}")
+    }
+}
+
+/// DPT 11.001 date: 000DDDDD 0000MMMM 0YYYYYYY (year ≥ 90 → 19xx, else 20xx).
+pub fn decode_date(d: &[u8]) -> String {
+    let (day, month, y) = (d[0] & 0x1f, d[1] & 0x0f, d[2] & 0x7f);
+    let year = if y >= 90 { 1900 + y as u32 } else { 2000 + y as u32 };
+    format!("{day:02}.{month:02}.{year}")
+}
+
+/// DPT 19.001 date and time: year-1900, month, day, day/hour, minutes, seconds, flags (2 bytes).
+pub fn decode_datetime(d: &[u8]) -> String {
+    let year = 1900 + d[0] as u32;
+    let (month, day) = (d[1] & 0x0f, d[2] & 0x1f);
+    let wd = d[3] >> 5;
+    let (h, m, s) = (d[3] & 0x1f, d[4] & 0x3f, d[5] & 0x3f);
+    let day_txt = if (1..=7).contains(&wd) { format!("{} ", WEEKDAYS[wd as usize - 1]) } else { String::new() };
+    format!("{day_txt}{day:02}.{month:02}.{year} {h:02}:{m:02}:{s:02}")
+}
+
+fn split_weekday(t: &str) -> (u8, &str) {
+    let t = t.trim();
+    let low = t.to_lowercase();
+    const LONG: [&str; 7] = ["mo", "tu|di", "we|mi", "th|do", "fr", "sa", "su|so"];
+    if let Some((first, rest)) = low.split_once([' ', ',']) {
+        if first.chars().all(|c| c.is_alphabetic()) && first.len() >= 2 {
+            let p2 = &first[..2];
+            for (i, alts) in LONG.iter().enumerate() {
+                if alts.split('|').any(|a| a == p2) {
+                    let skip = t.len() - rest.len();
+                    return ((i + 1) as u8, t[skip..].trim_start_matches([' ', ',']).trim());
+                }
+            }
+        }
+    }
+    (0, t)
+}
+
+fn hms(t: &str) -> Result<(u8, u8, u8), String> {
+    let p: Vec<&str> = t.split(':').map(|x| x.trim()).collect();
+    if p.len() < 2 || p.len() > 3 {
+        return Err(format!("\"{t}\" is not a time (use hh:mm:ss)"));
+    }
+    let n = |x: &str, max: u8| x.parse::<u8>().ok().filter(|v| *v <= max).ok_or_else(|| format!("\"{t}\" is not a time (use hh:mm:ss)"));
+    Ok((n(p[0], 23)?, n(p[1], 59)?, if p.len() == 3 { n(p[2], 59)? } else { 0 }))
+}
+
+fn dmy(t: &str) -> Result<(u8, u8, u32), String> {
+    let bad = || format!("\"{t}\" is not a date (use dd.mm.yyyy)");
+    let t = t.trim();
+    let (d, m, y) = if t.contains('-') {
+        let p: Vec<&str> = t.split('-').collect();
+        if p.len() != 3 { return Err(bad()) }
+        (p[2], p[1], p[0])
+    } else {
+        let p: Vec<&str> = t.split(['.', '/']).collect();
+        if p.len() != 3 { return Err(bad()) }
+        (p[0], p[1], p[2])
+    };
+    let d: u8 = d.trim().parse().ok().filter(|v| (1..=31).contains(v)).ok_or_else(bad)?;
+    let m: u8 = m.trim().parse().ok().filter(|v| (1..=12).contains(v)).ok_or_else(bad)?;
+    let mut y: u32 = y.trim().parse().map_err(|_| bad())?;
+    if y < 100 {
+        y += if y >= 90 { 1900 } else { 2000 };
+    }
+    Ok((d, m, y))
+}
+
+/// Local time now: (year, month, day, weekday 1..7, hour, minute, second).
+pub fn now_local() -> (u32, u8, u8, u8, u8, u8, u8) {
+    let n = chrono::Local::now();
+    use chrono::{Datelike, Timelike};
+    (n.year() as u32, n.month() as u8, n.day() as u8, n.weekday().number_from_monday() as u8, n.hour() as u8, n.minute() as u8, n.second() as u8)
+}
+
+pub fn encode_time(t: &str) -> Result<[u8; 3], String> {
+    if t.eq_ignore_ascii_case("now") {
+        let (_, _, _, wd, h, m, s) = now_local();
+        return Ok([(wd << 5) | h, m, s]);
+    }
+    let (wd, rest) = split_weekday(t);
+    let (h, m, s) = hms(rest)?;
+    Ok([(wd << 5) | h, m, s])
+}
+
+pub fn encode_date(t: &str) -> Result<[u8; 3], String> {
+    let (d, m, y) = if t.eq_ignore_ascii_case("today") || t.eq_ignore_ascii_case("now") {
+        let (y, m, d, ..) = now_local();
+        (d, m, y)
+    } else {
+        dmy(t)?
+    };
+    if !(1990..=2089).contains(&y) {
+        return Err("Year must be 1990…2089".into());
+    }
+    Ok([d, m, (y % 100) as u8])
+}
+
+pub fn encode_datetime(t: &str) -> Result<[u8; 8], String> {
+    let (y, mo, d, wd, h, mi, s) = if t.eq_ignore_ascii_case("now") {
+        now_local()
+    } else {
+        let (wd, rest) = split_weekday(t);
+        let (date, time) = rest.split_once(' ').unwrap_or((rest, "00:00:00"));
+        let (d, mo, y) = dmy(date)?;
+        let (h, mi, s) = hms(time.trim())?;
+        (y, mo, d, wd, h, mi, s)
+    };
+    if !(1900..=2155).contains(&y) {
+        return Err("Year must be 1900…2155".into());
+    }
+    // Flags: no working-day info (WD invalid bit 0x20 in byte 6), external sync off.
+    Ok([(y - 1900) as u8, mo, d, (wd << 5) | h, mi, s, 0x20, 0x00])
 }
 
 // ------------------------------------------------------------------ KNXnet/IP packets
@@ -1597,5 +1730,37 @@ mod tests {
         assert_eq!(encode_value("5.001 percentage", "100").unwrap(), (vec![255], false));
         assert_eq!(encode_value("1.001 switch", "on").unwrap(), (vec![1], true));
         assert_eq!(decode_value("9.001", &[0x0C, 0x33], false), "21.5");
+    }
+}
+
+#[cfg(test)]
+mod time_date_tests {
+    use super::*;
+
+    #[test]
+    fn time_of_day_10_001() {
+        // Tuesday (2) 14:23:05 → 0x4E 0x17 0x05
+        assert_eq!(decode_value("10.001 time of day", &[0x4E, 0x17, 0x05], false), "Tue 14:23:05");
+        assert_eq!(decode_value("10.001", &[0x08, 0x00, 0x3B], false), "08:00:59");
+        assert_eq!(encode_value("10.001", "Tue 14:23:05").unwrap(), (vec![0x4E, 0x17, 0x05], false));
+        assert_eq!(encode_value("10.001", "Di 14:23").unwrap(), (vec![0x4E, 0x17, 0x00], false));
+        assert_eq!(encode_value("10.001", "07:30:00").unwrap(), (vec![0x07, 0x1E, 0x00], false));
+        assert!(encode_value("10.001", "25:00").is_err());
+    }
+
+    #[test]
+    fn date_11_001() {
+        assert_eq!(decode_value("11.001 date", &[25, 11, 26], false), "25.11.2026");
+        assert_eq!(decode_value("11.001", &[1, 1, 99], false), "01.01.1999");
+        assert_eq!(encode_value("11.001", "25.11.2026").unwrap(), (vec![25, 11, 26], false));
+        assert_eq!(encode_value("11.001", "2026-11-25").unwrap(), (vec![25, 11, 26], false));
+        assert!(encode_value("11.001", "32.01.2026").is_err());
+    }
+
+    #[test]
+    fn date_time_19_001() {
+        let (b, _) = encode_value("19.001", "Wed 25.11.2026 14:30:00").unwrap();
+        assert_eq!(&b[..6], &[126, 11, 25, (3 << 5) | 14, 30, 0]);
+        assert_eq!(decode_value("19.001", &b, false), "Wed 25.11.2026 14:30:00");
     }
 }

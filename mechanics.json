@@ -18,6 +18,11 @@
     {"name": "line scan range", "group": "diagnostics", "value": "0-255", "source": "KNX standard (8-bit device number)"},
     {"name": "factory individual address", "group": "simulation", "value": "15.15.255", "source": "KNX standard"},
     {"name": "simulated mask version", "group": "simulation", "value": "07B0", "estimated": true},
-    {"name": "simulated line scan speed", "group": "simulation", "value": 64, "unit": "addresses/s", "estimated": true}
+    {"name": "simulated line scan speed", "group": "simulation", "value": 64, "unit": "addresses/s", "estimated": true},
+    {"name": "DPT 10.001 time of day encoding", "group": "values", "value": "3 bytes: NNNHHHHH 00MMMMMM 00SSSSSS (day 1=Mon..7=Sun, 0=none)", "source": "KNX standard"},
+    {"name": "DPT 11.001 date encoding", "group": "values", "value": "3 bytes: 000DDDDD 0000MMMM 0YYYYYYY (>=90 -> 19xx, else 20xx)", "source": "KNX standard"},
+    {"name": "DPT 19.001 date time encoding", "group": "values", "value": "8 bytes: year-1900, month, day, NNNHHHHH, minutes, seconds, 2 flag bytes", "source": "KNX standard"},
+    {"name": "time display format", "group": "values", "value": "Tue 14:23:05", "estimated": true},
+    {"name": "date display format", "group": "values", "value": "25.11.2026", "estimated": true}
   ]
 }

@@ -33,3 +33,13 @@ Individual Addresses › Programming Mode, Individual Address Check, Line Scan.
 | Simulated line scan speed: 64 addresses per second | **estimated** |
 | Simulated device info / check / switch durations: 1.2 s / 0.8 s / 0.6 s | **estimated** |
 | Simulated load states follow the device's download marks (application loaded when program and parameters are downloaded, tables when group addresses are) | **estimated** |
+
+## Time and date values (group monitor, last values, sending)
+
+| Value | Source |
+|---|---|
+| 10.001 time of day: 3 bytes NNNHHHHH 00MMMMMM 00SSSSSS; day 1 = Monday … 7 = Sunday, 0 = no day | KNX standard |
+| 11.001 date: 3 bytes 000DDDDD 0000MMMM 0YYYYYYY; year 90–99 → 1990–1999, 0–89 → 2000–2089 | KNX standard |
+| 19.001 date time: 8 bytes (year − 1900, month, day, weekday/hour, minutes, seconds, 2 flag bytes) | KNX standard |
+| Shown as "Tue 14:23:05" and "25.11.2026"; typed as the same, or "now" / "today" | **estimated** (display format) |
+| An address without its own data type uses the type of a group object linked to it | **estimated** |

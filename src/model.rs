@@ -384,8 +384,11 @@ pub const DPTS: &[&str] = &[
     "9.001 temperature (°C)",
     "9.004 lux (Lux)",
     "9.005 speed (m/s)",
+    "10.001 time of day",
+    "11.001 date",
     "14.056 power (W)",
     "16.000 character string",
+    "19.001 date time",
     "20.102 HVAC mode",
 ];
 
@@ -395,6 +398,8 @@ pub fn dpt_size(dpt: &str) -> &'static str {
         "3" => "4 bit",
         "5" | "20" => "1 byte",
         "9" => "2 bytes",
+        "10" | "11" => "3 bytes",
+        "19" => "8 bytes",
         "14" => "4 bytes",
         "16" => "14 bytes",
         _ => "",
@@ -503,6 +508,19 @@ impl Project {
     }
     pub fn ga(&self, id: u32) -> Option<&GroupAddress> {
         self.addresses.iter().find(|g| g.id == id)
+    }
+    /// The data type used to show a group address's values: its own, or else the type of a
+    /// group object linked to it (so values still decode when the address has no type set).
+    pub fn value_dpt(&self, g: &GroupAddress) -> String {
+        if !g.dpt.is_empty() {
+            return g.dpt.clone();
+        }
+        self.devices
+            .iter()
+            .flat_map(|d| d.objects.iter())
+            .find(|o| !o.dpt.is_empty() && o.links.contains(&g.id))
+            .map(|o| o.dpt.clone())
+            .unwrap_or_default()
     }
     pub fn ga_mut(&mut self, id: u32) -> Option<&mut GroupAddress> {
         self.addresses.iter_mut().find(|g| g.id == id)
@@ -912,6 +930,8 @@ pub fn catalog() -> Vec<Product> {
             obj(2, "Rain", "Rain alarm", "1.005 alarm", CRT),
             obj(3, "Brightness", "Lux value", "9.004 lux (Lux)", CRT),
             obj(4, "Temperature", "Outdoor temperature", "9.001 temperature (°C)", CRT),
+            obj(5, "Clock", "Time of day", "10.001 time of day", CRT),
+            obj(6, "Clock", "Date", "11.001 date", CRT),
         ],
     });
     // System devices
@@ -1039,6 +1059,8 @@ pub fn sample_project(cat: &[Product]) -> Project {
     let g_t_set = ga(&mut p, 2, 0, 2, "Bedroom setpoint", "9.001 temperature (°C)", false);
     let g_t_val = ga(&mut p, 2, 0, 3, "Bedroom heating valve", "5.001 percentage (0..100%)", false);
     let g_all_off = ga(&mut p, 3, 0, 1, "All lights off", "1.001 switch", true);
+    ga(&mut p, 3, 0, 2, "System time", "10.001 time of day", true);
+    ga(&mut p, 3, 0, 3, "System date", "11.001 date", true);
 
     let find = |name: &str| cat.iter().find(|c| c.name.starts_with(name)).cloned().unwrap();
 
